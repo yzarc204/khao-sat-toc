@@ -27,6 +27,8 @@ if (!isBuildPhase) {
 db.pragma("foreign_keys = ON");
 db.pragma("busy_timeout = 5000");
 
+const NO_HAIR_OPTION_NAME = "không có tóc";
+
 function migrate() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS survey_settings (
@@ -190,6 +192,10 @@ function mapOption(row: {
     sortOrder: row.sort_order,
     createdAt: row.created_at,
   };
+}
+
+function normalizeOptionName(name: string) {
+  return name.trim().toLocaleLowerCase("vi-VN");
 }
 
 export function getSurveySettings(): SurveySettings {
@@ -496,6 +502,74 @@ export function deleteResponse(responseId: number) {
 
 export function deleteAllResponses() {
   db.prepare("DELETE FROM responses").run();
+}
+
+export function reloadNoHairResponses() {
+  const options = getOptions();
+  const noHairOption = options.find(
+    (option) => normalizeOptionName(option.name) === NO_HAIR_OPTION_NAME
+  );
+
+  if (!noHairOption) {
+    return { updatedResponses: 0, keptResponseId: null as number | null };
+  }
+
+  const responsesWithNoHair = getResponses().filter((response) =>
+    response.selectedOptionIds.includes(noHairOption.id)
+  );
+
+  if (responsesWithNoHair.length <= 1) {
+    return {
+      updatedResponses: 0,
+      keptResponseId: responsesWithNoHair[0]?.id ?? null,
+    };
+  }
+
+  const alternativeOptionIds = options
+    .filter((option) => option.id !== noHairOption.id)
+    .map((option) => option.id);
+
+  if (alternativeOptionIds.length === 0) {
+    throw new Error("Không có lựa chọn nào khác để thay thế cho 'Không có tóc'.");
+  }
+
+  const keepResponseId = responsesWithNoHair[0].id;
+  const updateChoice = db.prepare(
+    `UPDATE response_choices
+     SET option_id = @nextOptionId
+     WHERE response_id = @responseId AND option_id = @currentOptionId`
+  );
+  const deleteChoice = db.prepare(
+    `DELETE FROM response_choices
+     WHERE response_id = ? AND option_id = ?`
+  );
+
+  const tx = db.transaction(() => {
+    responsesWithNoHair.slice(1).forEach((response) => {
+      const selectedOptionIds = new Set(response.selectedOptionIds);
+      const candidates = alternativeOptionIds.filter((optionId) => !selectedOptionIds.has(optionId));
+
+      if (candidates.length === 0) {
+        // Fallback when the response already contains every other option.
+        deleteChoice.run(response.id, noHairOption.id);
+        return;
+      }
+
+      const nextOptionId = candidates[Math.floor(Math.random() * candidates.length)];
+      updateChoice.run({
+        responseId: response.id,
+        currentOptionId: noHairOption.id,
+        nextOptionId,
+      });
+    });
+  });
+
+  tx();
+
+  return {
+    updatedResponses: responsesWithNoHair.length - 1,
+    keptResponseId: keepResponseId,
+  };
 }
 
 function getResponses(): ResponseRow[] {

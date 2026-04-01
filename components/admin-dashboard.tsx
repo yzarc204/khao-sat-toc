@@ -302,6 +302,7 @@ export default function AdminDashboard({ tab }: { tab: AdminTab }) {
   const [error, setError] = useState<string | null>(null);
   const [savingSettings, setSavingSettings] = useState(false);
   const [savingOption, setSavingOption] = useState(false);
+  const [reloadingResults, setReloadingResults] = useState(false);
   const [optionModal, setOptionModal] = useState<OptionModalState>({
     isOpen: false,
     mode: "create",
@@ -419,20 +420,20 @@ export default function AdminDashboard({ tab }: { tab: AdminTab }) {
     const optimisticOptions =
       optionModal.mode === "create"
         ? [
-            ...previousOptions,
-            {
-              id: -Date.now(),
-              name: draft.name,
-              imageUrl: draft.imageUrl,
-              sortOrder: previousOptions.length,
-              createdAt: new Date().toISOString(),
-            },
-          ]
+          ...previousOptions,
+          {
+            id: -Date.now(),
+            name: draft.name,
+            imageUrl: draft.imageUrl,
+            sortOrder: previousOptions.length,
+            createdAt: new Date().toISOString(),
+          },
+        ]
         : previousOptions.map((item) =>
-            item.id === optionModal.option?.id
-              ? { ...item, name: draft.name, imageUrl: draft.imageUrl }
-              : item
-          );
+          item.id === optionModal.option?.id
+            ? { ...item, name: draft.name, imageUrl: draft.imageUrl }
+            : item
+        );
     setData((prev) => (prev ? { ...prev, options: normalizeOptions(optimisticOptions) } : prev));
 
     try {
@@ -465,23 +466,23 @@ export default function AdminDashboard({ tab }: { tab: AdminTab }) {
         setData((prev) =>
           prev
             ? {
-                ...prev,
-                options: normalizeOptions([
-                  ...previousOptions,
-                  { ...updatedOption, sortOrder: previousOptions.length },
-                ]),
-              }
+              ...prev,
+              options: normalizeOptions([
+                ...previousOptions,
+                { ...updatedOption, sortOrder: previousOptions.length },
+              ]),
+            }
             : prev
         );
       } else {
         setData((prev) =>
           prev
             ? {
-                ...prev,
-                options: normalizeOptions(
-                  prev.options.map((item) => (item.id === updatedOption.id ? { ...item, ...updatedOption } : item))
-                ),
-              }
+              ...prev,
+              options: normalizeOptions(
+                prev.options.map((item) => (item.id === updatedOption.id ? { ...item, ...updatedOption } : item))
+              ),
+            }
             : prev
         );
       }
@@ -521,6 +522,32 @@ export default function AdminDashboard({ tab }: { tab: AdminTab }) {
       await loadDashboard();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Không thể xóa toàn bộ kết quả");
+    }
+  }
+
+  async function reloadResults() {
+    if (reloadingResults) return;
+
+    setReloadingResults(true);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/admin/responses/reload", { method: "POST" });
+
+      if (response.status === 401) {
+        router.push("/admin/login");
+        return;
+      }
+
+      if (!response.ok) {
+        const payload = (await response.json()) as { error?: string };
+        throw new Error(payload.error ?? "Không thể tải lại kết quả");
+      }
+
+      window.location.reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Không thể tải lại kết quả");
+      setReloadingResults(false);
     }
   }
 
@@ -615,6 +642,32 @@ export default function AdminDashboard({ tab }: { tab: AdminTab }) {
         </nav>
 
         {error ? <p className="mt-4 rounded-xl bg-scarlet/10 p-3 text-sm text-scarlet">{error}</p> : null}
+
+        <section className="mt-5">
+          <div className="flex">
+            <button
+              type="button"
+              onClick={reloadResults}
+              disabled={reloadingResults}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-mid-blue px-4 py-3 text-sm font-semibold text-cultured disabled:opacity-60"
+            >
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                className={clsx("h-4 w-4", reloadingResults && "animate-spin")}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                <path d="M21 3v6h-6" />
+              </svg>
+              {reloadingResults ? "Đang cập nhật..." : "Cập nhật kết quả"}
+            </button>
+          </div>
+        </section>
 
         {tab === "survey" ? (
           <>
